@@ -9,8 +9,8 @@ A fast, native macOS CLI tool that crawls, renders, and stitches CyberArk's onli
 - **Smart Filtering**: Automatically strips hidden HTML comments (`<!-- -->`) to avoid parsing dead or deprecated ghost links.
 - **Native macOS Merging**: Uses macOS's built-in Quartz engine via `osascript` to stitch hundreds of PDFs together completely in-memory—no 3rd party tools required.
 - **AI-Ready Resources**: Generates clean, searchable PDFs that serve as excellent source documents for RAG (Retrieval-Augmented Generation) applications and AI research assistants like NotebookLM.
-- Beautiful CLI UI: Features a custom ASCII banner, dynamic spinners, and clean ANSI color-coded logging.
-- Multi-Language Support: Easily fetch documentation in English (`en`), Japanese (`ja`), or both simultaneously.
+- **Beautiful CLI UI:** Features a custom ASCII banner, dynamic spinners, and clean ANSI color-coded logging.
+- **Multi-Language Support**: Easily fetch documentation in English (`en`), Japanese (`ja`), or both simultaneously.
 
 ## 📋 Prerequisites
 
@@ -93,8 +93,8 @@ Run the script without any parameters to see the interactive help menu and a lis
 
 The script operates in three distinct phases:
 
-- **Phase 1: Crawling**. The script targets a specific CyberArk tile, fetches the DOM, strips comments, extracts valid intra-product links, and recursively queues them up to your --depth limit.
-- **Phase 2: Batch Rendering**. Validated URLs are passed to headless Google Chrome, which renders each webpage into a pristine, print-ready PDF in chunks based on your --concurrency setting.
+- **Phase 1: Crawling**. The script targets a specific CyberArk tile, fetches the DOM, strips comments, extracts valid intra-product links, and recursively queues them up to your `--depth` limit.
+- **Phase 2: Batch Rendering**. Validated URLs are passed to headless Google Chrome, which renders each webpage into a pristine, print-ready PDF in chunks based on your `--concurrency` setting.
 - **Phase 3: Native Merging**. The script utilizes JavaScript for Automation (JXA) to call macOS's native Quartz framework, combining all individual page PDFs into a single, cohesive book without ever touching the disk.
 
 ## 👨‍💻 Maintainer
