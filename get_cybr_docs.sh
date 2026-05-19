@@ -42,6 +42,47 @@ stop_spinner() {
     echo -e "${GREEN}[Done]${RESET}"
 }
 
+# --- WATCHDOG RENDERER (PREVENTS CHROME FREEZES WITH RETRIES) ---
+render_with_timeout() {
+    local out_path="$1"
+    local target_url="$2"
+    local timeout=20
+    local max_retries=5
+    local attempt=1
+
+    while (( attempt <= max_retries )); do
+        "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --no-pdf-header-footer --print-to-pdf="$out_path" "$target_url" >/dev/null 2>&1 &
+        local c_pid=$!
+        
+        # Spawn a background timer that will kill Chrome if it takes too long
+        (
+            sleep $timeout
+            kill -9 $c_pid 2>/dev/null
+        ) &
+        local killer_pid=$!
+        
+        # Wait for Chrome to finish (or be killed)
+        wait $c_pid 2>/dev/null
+        
+        # If Chrome finished naturally, kill the watchdog timer so it doesn't linger
+        kill -9 $killer_pid 2>/dev/null
+
+        # Check if the PDF was successfully generated and is not empty
+        if [[ -s "$out_path" ]]; then
+            break # Success! Break out of the retry loop.
+        fi
+        
+        # If we reach here, the render failed or timed out.
+        if (( attempt < max_retries )); then
+            echo -e "         ${YELLOW}-> [RETRY $attempt/$max_retries] Timeout on: $target_url${RESET}"
+        else
+            echo -e "         ${DARK_RED}-> [FAILED] Given up after $max_retries retries: $target_url${RESET}"
+        fi
+        
+        (( attempt++ ))
+    done
+}
+
 # --- HEADER ASCII ART ---
 print_header() {
     echo -e "${BLUE}${BOLD}"
@@ -61,7 +102,7 @@ print_usage() {
     echo -e "${BOLD}Modes (Choose one):${RESET}"
     echo -e "  ${CYAN}--list${RESET}         Fetch and list all available CyberArk document tiles and their ID numbers."
     echo -e "  ${CYAN}--all${RESET}          Download ALL available document tiles."
-    echo -e "  ${CYAN}--tiles${RESET}        Comma-separated list of tile numbers to download (e.g., \"1, 2, 5\").\n"
+    echo -e "  ${CYAN}--tiles${RESET}        Comma-separated list or ranges of tile numbers to download (e.g., \"1, 3-5, 8\").\n"
     echo -e "${BOLD}Configuration Options:${RESET}"
     echo -e "  ${CYAN}--lang${RESET}         Languages to download (\"en\", \"ja\", or \"en,ja\"). Default: en,ja"
     echo -e "  ${CYAN}--depth${RESET}        Maximum nested link crawl depth. Default: 10"
@@ -69,7 +110,7 @@ print_usage() {
     echo -e "  ${CYAN}--engine${RESET}       Spider engine: 'chrome' (accurate, parses JS) or 'curl' (fast). Default: curl\n"
     echo -e "${BOLD}Examples:${RESET}"
     echo -e "  zsh $0 --list"
-    echo -e "  zsh $0 --tiles \"1, 2\" --lang \"en\" --depth 3 --concurrency 10"
+    echo -e "  zsh $0 --tiles \"1, 2-5\" --lang \"en\" --depth 3 --concurrency 10"
     echo -e "  zsh $0 --tiles \"38\" --engine chrome"
 }
 
@@ -95,7 +136,6 @@ TARGET_TILES=()
 TARGET_LANGS=("en" "ja")
 SHOW_USAGE_AFTER=false
 
-# Always show the header as soon as the script starts
 print_header
 
 if [[ "$#" -eq 0 ]]; then
@@ -161,7 +201,6 @@ ROOT_HTML=$(curl -s -L "$ROOT_URL")
 oldIFS=$IFS
 IFS=$'\n'
 
-# Using hex escapes (\x3C and \x3E) to strip HTML comments without breaking chat UI rendering
 TILE_DATA=($(echo "$ROOT_HTML" | perl -0777 -ne '
     s/\x3C!--.*?--!?\x3E//gs; 
     my $cat = "";
@@ -217,14 +256,14 @@ if [[ "$MODE" == "list" ]]; then
         print_usage
     else
         echo -e "\nTo download, run the script with parameters using the numbers above:"
-        echo -e "  ${BOLD}zsh $0 --tiles \"1, 2\" --lang \"en\"${RESET}"
+        echo -e "  ${BOLD}zsh $0 --tiles \"1, 3-5\" --lang \"en\"${RESET}"
     fi
     
     exit 0
 fi
 
 # ==========================================
-# FILTER TILES BASED ON NUMERIC PARAMS
+# FILTER TILES BASED ON NUMERIC PARAMS & RANGES
 # ==========================================
 FILTERED_TILES=()
 if [[ "$MODE" == "all" ]]; then
@@ -232,10 +271,33 @@ if [[ "$MODE" == "all" ]]; then
 elif [[ "$MODE" == "tiles" ]]; then
     for t in "${TARGET_TILES[@]}"; do
         t_clean=$(echo "$t" | tr -d ' ')
-        if [[ "$t_clean" =~ ^[0-9]+$ ]] && (( t_clean > 0 )) && (( t_clean <= ${#TILE_DATA[@]} )); then
-            FILTERED_TILES+=("${TILE_DATA[$t_clean]}")
+        
+        # Check if the input is a range (e.g., 2-5)
+        if [[ "$t_clean" =~ ^[0-9]+-[0-9]+$ ]]; then
+            start_val="${t_clean%%-*}"
+            end_val="${t_clean##*-}"
+            
+            if (( start_val <= end_val )); then
+                for (( i=start_val; i<=end_val; i++ )); do
+                    if (( i > 0 )) && (( i <= ${#TILE_DATA[@]} )); then
+                        FILTERED_TILES+=("${TILE_DATA[$i]}")
+                    else
+                        echo -e "${RED}[-] Invalid tile number in range: '$i'. Skipping.${RESET}"
+                    fi
+                done
+            else
+                echo -e "${RED}[-] Invalid range: '$t_clean'. Start must be less than or equal to End. Skipping.${RESET}"
+            fi
+            
+        # Check if the input is a single number
+        elif [[ "$t_clean" =~ ^[0-9]+$ ]]; then
+            if (( t_clean > 0 )) && (( t_clean <= ${#TILE_DATA[@]} )); then
+                FILTERED_TILES+=("${TILE_DATA[$t_clean]}")
+            else
+                echo -e "${RED}[-] Invalid tile number: '$t_clean'. Skipping.${RESET}"
+            fi
         else
-            echo -e "${RED}[-] Invalid tile number: '$t'. Skipping.${RESET}"
+            echo -e "${RED}[-] Invalid tile format: '$t_clean'. Use single numbers or ranges (e.g., '1', '2-5'). Skipping.${RESET}"
         fi
     done
 fi
@@ -307,7 +369,7 @@ for item in "${FILTERED_TILES[@]}"; do
                     else
                         echo -e "         ${GRAY}-> [CHROME] Rendering DOM: $current_url${RESET}"
                         (
-                            "$CHROME_PATH" --headless=new --dump-dom --virtual-time-budget=3000 "$current_url" > "$html_path" 2>/dev/null
+                            "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --dump-dom --virtual-time-budget=5000 "$current_url" > "$html_path" 2>/dev/null
                             if [[ ! -s "$html_path" ]]; then
                                 rm -f "$html_path"
                             else
@@ -329,7 +391,6 @@ for item in "${FILTERED_TILES[@]}"; do
                 fi
                 
                 if (( depth < DEPTH_LIMIT )); then
-                    # Using hex escapes (\x3C and \x3E) here as well to strip comments
                     sub_links=($(cat "$html_path" | perl -0777 -ne 's/\x3C!--.*?--!?\x3E//gs; while (/href=(["\x27])([^"\x27]+)\1/g) { my $l=$2; next if $l=~/\[%/; $l=~s/[#?].*//; print "$l\n" if $l; }' | sort -u))
                     
                     for sub in "${sub_links[@]}"; do
@@ -380,7 +441,9 @@ for item in "${FILTERED_TILES[@]}"; do
                 printf_idx=$(printf "%04d" $idx)
                 pdf_path="${temp_dir}/page_${printf_idx}.pdf"
                 
-                "$CHROME_PATH" --headless=new --no-pdf-header-footer --print-to-pdf="$pdf_path" "$current_url" 2>/dev/null &
+                # Hand over rendering to the Watchdog function with built-in retries
+                render_with_timeout "$pdf_path" "$current_url" &
+                
             done
             wait 
         done
