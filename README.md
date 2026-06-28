@@ -52,7 +52,44 @@ Run the script without any parameters to see the interactive help menu and a lis
 ./get_idira_docs.sh
 ```
 
+Example output:
+```text
+[*] Fetching available document tiles from https://docs.cyberark.com/portal/latest/en/docs.htm... [Done]
 
+=== AVAILABLE IDIRA TILES ===
+ [ 1] Start here - What_s new
+ [ 2] Start here - Platform fundamentals
+ [ 3] Start here - CORA AI
+ ...
+ [33] MSP solutions - MSP Hub
+================================
+
+Idira Docs Downloader CLI
+
+Usage: ./get_idira_docs.sh [OPTIONS]
+...
+```
+
+Run the script with `--list` to print the same tile list without the follow-up usage banner:
+```
+./get_idira_docs.sh --list
+```
+
+Example output:
+```text
+[*] Fetching available document tiles from https://docs.cyberark.com/portal/latest/en/docs.htm... [Done]
+
+=== AVAILABLE IDIRA TILES ===
+ [ 1] Start here - What_s new
+ [ 2] Start here - Platform fundamentals
+ [ 3] Start here - CORA AI
+ ...
+ [33] MSP solutions - MSP Hub
+================================
+
+To download, run the script with parameters using the numbers above:
+  ./get_idira_docs.sh --tiles "1, 3-5" --lang "en"
+```
 
 ## Parameters
 
