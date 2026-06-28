@@ -216,13 +216,19 @@ html_text = os.environ["ROOT_HTML"]
 html_text = re.sub(r'<!--.*?-->', '', html_text, flags=re.S)
 
 current_category = ""
-for match in re.finditer(r'<h2[^>]*class="[^"]*cat-title[^"]*"[^>]*>(.*?)</h2>', html_text, flags=re.I | re.S):
-    text = re.sub(r'<[^>]+>', '', html.unescape(match.group(1)))
-    current_category = re.sub(r'\s+', ' ', text).strip()
+pattern = re.compile(
+    r'<h2[^>]*class="[^"]*cat-title[^"]*"[^>]*>(?P<cat>.*?)</h2>|<div[^>]*class="[^"]*(?:portal-tile|space-tile)[^"]*"[^>]*>.*?<a[^>]*href=(?P<quote>["\'])(?P<url>.*?)(?P=quote)[^>]*>.*?<div[^>]*class="[^"]*(?:portal-tile-content|space-tile-content)[^"]*"[^>]*>(?P<content>.*?)</div>',
+    flags=re.I | re.S,
+)
 
-for match in re.finditer(r'<div[^>]*class="[^"]*(?:portal-tile|space-tile)[^"]*"[^>]*>.*?<a[^>]*href=("|\')(.*?)\1[^>]*>.*?<div[^>]*class="[^"]*(?:portal-tile-content|space-tile-content)[^"]*"[^>]*>(.*?)</div>', html_text, flags=re.I | re.S):
-    url = match.group(2).strip()
-    content = match.group(3)
+for match in pattern.finditer(html_text):
+    if match.group("cat") is not None:
+        text = re.sub(r'<[^>]+>', '', html.unescape(match.group("cat")))
+        current_category = re.sub(r'\s+', ' ', text).strip()
+        continue
+
+    url = match.group("url").strip()
+    content = match.group("content")
     title_match = re.search(r'<p[^>]*>(.*?)</p>', content, flags=re.I | re.S)
     if not title_match:
         continue
