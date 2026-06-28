@@ -100,7 +100,7 @@ EOF
 # --- HELP MENU ---
 print_usage() {
     echo -e "${BOLD}Idira Docs Downloader CLI${RESET}\n"
-    echo -e "${BOLD}Usage:${RESET} zsh get_idira_docs.sh [OPTIONS]\n"
+    echo -e "${BOLD}Usage:${RESET} ./get_idira_docs.sh [OPTIONS]\n"
     echo -e "${BOLD}Modes (Choose one):${RESET}"
     echo -e "  ${CYAN}--list${RESET}         Fetch and list all available Idira document tiles and their ID numbers."
     echo -e "  ${CYAN}--all${RESET}          Download ALL available document tiles."
@@ -111,9 +111,9 @@ print_usage() {
     echo -e "  ${CYAN}--concurrency${RESET}  Number of concurrent parallel pages to download. Default: 10"
     echo -e "  ${CYAN}--engine${RESET}       Spider engine: 'chrome' (accurate, parses JS) or 'curl' (fast). Default: curl\n"
     echo -e "${BOLD}Examples:${RESET}"
-    echo -e "  zsh get_idira_docs.sh --list"
-    echo -e "  zsh get_idira_docs.sh --tiles \"1, 2-5\" --lang \"en\" --depth 3 --concurrency 10"
-    echo -e "  zsh get_idira_docs.sh --tiles \"38\" --engine chrome"
+    echo -e "  ./get_idira_docs.sh --list"
+    echo -e "  ./get_idira_docs.sh --tiles \"1, 2-5\" --lang \"en\" --depth 3 --concurrency 10"
+    echo -e "  ./get_idira_docs.sh --tiles \"38\" --engine chrome"
 }
 
 # ==========================================
@@ -271,7 +271,7 @@ if [[ "$MODE" == "list" ]]; then
         print_usage
     else
         echo -e "\nTo download, run the script with parameters using the numbers above:"
-        echo -e "  ${BOLD}zsh get_idira_docs.sh --tiles \"1, 3-5\" --lang \"en\"${RESET}"
+        echo -e "  ${BOLD}./get_idira_docs.sh --tiles \"1, 3-5\" --lang \"en\"${RESET}"
     fi
     
     exit 0
@@ -373,7 +373,7 @@ for item in "${FILTERED_TILES[@]}"; do
                     if [[ "$ENGINE" == "curl" ]]; then
                         echo -e "         ${GRAY}-> [cURL] Fetching: $current_url${RESET}"
                         (
-                            http_code=$(curl -s -L -w "%{http_code}" -o "$html_path" "$current_url")
+                            http_code=$(curl -s -L -A "$USER_AGENT" -w "%{http_code}" -o "$html_path" "$current_url")
                             if [[ "$http_code" -ge 400 ]] || [[ "$http_code" == "000" ]]; then
                                 echo -e "         ${DARK_RED}-> [SKIP] HTTP $http_code (Dead Link): $current_url${RESET}"
                                 rm -f "$html_path"
