@@ -125,11 +125,6 @@ CONCURRENCY=10
 ENGINE="curl" 
 CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
-if [[ ! -f "$CHROME_PATH" ]]; then
-    echo -e "${RED}[!] Google Chrome is required for rendering PDFs in Phase 2.${RESET}"
-    exit 1
-fi
-
 # ==========================================
 # ARGUMENT PARSING
 # ==========================================
@@ -167,6 +162,11 @@ if [[ -z "$MODE" ]]; then
     exit 1
 fi
 
+if [[ "$MODE" != "list" ]] && [[ ! -f "$CHROME_PATH" ]]; then
+    echo -e "${RED}[!] Google Chrome is required for rendering PDFs in Phase 2.${RESET}"
+    exit 1
+fi
+
 # ==========================================
 # URL RESOLVER (WITH NORMALIZATION)
 # ==========================================
@@ -198,44 +198,51 @@ else
     start_spinner "[*] Loading Portal Root: $ROOT_URL..."
 fi
 
-ROOT_HTML=$(curl -s -L "$ROOT_URL")
+USER_AGENT='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36'
+ROOT_HTML=$(curl -s -L -A "$USER_AGENT" "$ROOT_URL")
 
 oldIFS=$IFS
 IFS=$'\n'
 
-TILE_DATA=($(echo "$ROOT_HTML" | perl -0777 -ne '
-    s/\x3C!--.*?--!?\x3E//gs; 
-    my $cat = "";
-    while (m{<h2[^>]*class="cat-title"[^>]*>(.*?)</h2>|<div[^>]*class="[^"]*(?:portal-tile|space-tile)[^"]*"[^>]*>.*?href=(["\x27])([^"\x27]+)\2.*?(?:<p[^>]*>)(.*?)</p>}gis) {
-        if ($1) {
-            $cat = $1;
-            $cat =~ s/<[^>]+>//g;
-            $cat =~ s/^\s+|\s+$//g;
-        } elsif ($3 && $4) {
-            my $url = $3;
-            my $title = $4;
-            
-            $url =~ s/[#?].*//;
-            $title =~ s/<[^>]+>//g;
-            $title =~ s/&amp;/&/ig;
-            $title =~ s/&#160;/ /ig;
-            $title =~ s/&nbsp;/ /ig;
-            $title =~ s/&#39;/\x27/ig;
-            $title =~ s/^\s+|\s+$//g;
-            
-            my $full_name = $title;
-            if ($cat ne "" && $cat !~ /Spaces/i) {
-                $full_name = "$cat - $title";
-            }
-            
-            $full_name =~ s/[^a-zA-Z0-9 \-&()]/_/g;
-            $full_name =~ s/\s+/ /g;
-            $full_name =~ s/^\s+|\s+$//g;
-            
-            print "$url|$full_name\n" if $url ne "";
-        }
-    }
-'))
+TILE_DATA=()
+while IFS= read -r line; do
+    TILE_DATA+=("$line")
+done < <(ROOT_HTML="$ROOT_HTML" python3 - <<'PY'
+import os
+import re
+import html
+
+html_text = os.environ["ROOT_HTML"]
+html_text = re.sub(r'<!--.*?-->', '', html_text, flags=re.S)
+
+current_category = ""
+for match in re.finditer(r'<h2[^>]*class="[^"]*cat-title[^"]*"[^>]*>(.*?)</h2>', html_text, flags=re.I | re.S):
+    text = re.sub(r'<[^>]+>', '', html.unescape(match.group(1)))
+    current_category = re.sub(r'\s+', ' ', text).strip()
+
+for match in re.finditer(r'<div[^>]*class="[^"]*(?:portal-tile|space-tile)[^"]*"[^>]*>.*?<a[^>]*href=("|\')(.*?)\1[^>]*>.*?<div[^>]*class="[^"]*(?:portal-tile-content|space-tile-content)[^"]*"[^>]*>(.*?)</div>', html_text, flags=re.I | re.S):
+    url = match.group(2).strip()
+    content = match.group(3)
+    title_match = re.search(r'<p[^>]*>(.*?)</p>', content, flags=re.I | re.S)
+    if not title_match:
+        continue
+
+    title = re.sub(r'<[^>]+>', '', html.unescape(title_match.group(1)))
+    title = re.sub(r'\s+', ' ', title).strip()
+    if not title:
+        continue
+
+    if current_category:
+        title = f"{current_category} - {title}"
+
+    title = re.sub(r'[^a-zA-Z0-9 \-&()]', '_', title)
+    title = re.sub(r'\s+', ' ', title).strip()
+
+    if url:
+        url = re.sub(r'[#?].*$', '', url)
+        print(f"{url}|{title}")
+PY
+)
 
 IFS=$oldIFS
 stop_spinner
