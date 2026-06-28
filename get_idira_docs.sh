@@ -87,20 +87,22 @@ render_with_timeout() {
 print_header() {
     echo -e "${BLUE}${BOLD}"
     cat << 'EOF'
-   _____   _____ ___   ___               _        ___ ___  ___ 
-  / __\ \ / / _ ) _ \ |   \ ___  __ ___ (_)_ _   | _ \   \| __|
- | (__ \ V /| _ \   / | |) / _ \/ _(_-< | | ' \  |  _/ |) | _| 
-  \___| |_| |___/_|_\ |___/\___/\__/__/ |_|_||_| |_| |___/|_|  
+    ____    ___               ____                     _          ____  ____  ______
+   /  _/___/ (_)________ _   / __ \____  __________   (_)___     / __ \/ __ \/ ____/
+   / // __  / / ___/ __ `/  / / / / __ \/ ___/ ___/  / / __ \   / /_/ / / / / /_    
+ _/ // /_/ / / /  / /_/ /  / /_/ / /_/ / /__(__  )  / / / / /  / ____/ /_/ / __/    
+/___/\__,_/_/_/   \__,_/  /_____/\____/\___/____/  /_/_/ /_/  /_/   /_____/_/       
+                                                                                    
 EOF
     echo -e "${RESET}"
 }
 
 # --- HELP MENU ---
 print_usage() {
-    echo -e "${BOLD}CyberArk Docs Downloader CLI${RESET}\n"
-    echo -e "${BOLD}Usage:${RESET} zsh $0 [OPTIONS]\n"
+    echo -e "${BOLD}Idira Docs Downloader CLI${RESET}\n"
+    echo -e "${BOLD}Usage:${RESET} zsh get_idira_docs.sh [OPTIONS]\n"
     echo -e "${BOLD}Modes (Choose one):${RESET}"
-    echo -e "  ${CYAN}--list${RESET}         Fetch and list all available CyberArk document tiles and their ID numbers."
+    echo -e "  ${CYAN}--list${RESET}         Fetch and list all available Idira document tiles and their ID numbers."
     echo -e "  ${CYAN}--all${RESET}          Download ALL available document tiles."
     echo -e "  ${CYAN}--tiles${RESET}        Comma-separated list or ranges of tile numbers to download (e.g., \"1, 3-5, 8\").\n"
     echo -e "${BOLD}Configuration Options:${RESET}"
@@ -109,9 +111,9 @@ print_usage() {
     echo -e "  ${CYAN}--concurrency${RESET}  Number of concurrent parallel pages to download. Default: 10"
     echo -e "  ${CYAN}--engine${RESET}       Spider engine: 'chrome' (accurate, parses JS) or 'curl' (fast). Default: curl\n"
     echo -e "${BOLD}Examples:${RESET}"
-    echo -e "  zsh $0 --list"
-    echo -e "  zsh $0 --tiles \"1, 2-5\" --lang \"en\" --depth 3 --concurrency 10"
-    echo -e "  zsh $0 --tiles \"38\" --engine chrome"
+    echo -e "  zsh get_idira_docs.sh --list"
+    echo -e "  zsh get_idira_docs.sh --tiles \"1, 2-5\" --lang \"en\" --depth 3 --concurrency 10"
+    echo -e "  zsh get_idira_docs.sh --tiles \"38\" --engine chrome"
 }
 
 # ==========================================
@@ -242,7 +244,7 @@ stop_spinner
 # LIST MODE: DISPLAY TILES AND EXIT
 # ==========================================
 if [[ "$MODE" == "list" ]]; then
-    echo -e "\n${BLUE}${BOLD}=== AVAILABLE CYBERARK TILES ===${RESET}"
+    echo -e "\n${BLUE}${BOLD}=== AVAILABLE IDIRA TILES ===${RESET}"
     count=1
     for item in "${TILE_DATA[@]}"; do
         title=$(echo "$item" | cut -d'|' -f2)
@@ -256,7 +258,7 @@ if [[ "$MODE" == "list" ]]; then
         print_usage
     else
         echo -e "\nTo download, run the script with parameters using the numbers above:"
-        echo -e "  ${BOLD}zsh $0 --tiles \"1, 3-5\" --lang \"en\"${RESET}"
+        echo -e "  ${BOLD}zsh get_idira_docs.sh --tiles \"1, 3-5\" --lang \"en\"${RESET}"
     fi
     
     exit 0
