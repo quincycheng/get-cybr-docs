@@ -42,6 +42,17 @@ stop_spinner() {
     echo -e "${GREEN}[Done]${RESET}"
 }
 
+is_error_page() {
+    local file="$1"
+    if [[ ! -f "$file" ]] || [[ ! -s "$file" ]]; then
+        return 0
+    fi
+    if grep -Eiq 'We can.t find the page|Page not found|403 Forbidden|Forbidden|Access denied|Not Found' "$file"; then
+        return 0
+    fi
+    return 1
+}
+
 # --- WATCHDOG RENDERER (PREVENTS CHROME FREEZES WITH RETRIES) ---
 render_with_timeout() {
     local out_path="$1"
@@ -51,7 +62,7 @@ render_with_timeout() {
     local attempt=1
 
     while (( attempt <= max_retries )); do
-        "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --no-pdf-header-footer --print-to-pdf="$out_path" "$target_url" >/dev/null 2>&1 &
+        "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --no-pdf-header-footer --user-agent="$USER_AGENT" --virtual-time-budget=10000 --print-to-pdf="$out_path" "$target_url" >/dev/null 2>&1 &
         local c_pid=$!
         
         # Spawn a background timer that will kill Chrome if it takes too long
@@ -215,21 +226,56 @@ import html
 html_text = os.environ["ROOT_HTML"]
 html_text = re.sub(r'<!--.*?-->', '', html_text, flags=re.S)
 
-current_category = ""
-pattern = re.compile(
-    r'<h2[^>]*class="[^"]*cat-title[^"]*"[^>]*>(?P<cat>.*?)</h2>|<div[^>]*class="[^"]*(?:portal-tile|space-tile)[^"]*"[^>]*>.*?<a[^>]*href=(?P<quote>["\'])(?P<url>.*?)(?P=quote)[^>]*>.*?<div[^>]*class="[^"]*(?:portal-tile-content|space-tile-content)[^"]*"[^>]*>(?P<content>.*?)</div>',
-    flags=re.I | re.S,
-)
+cat_positions = []
+for cat_match in re.finditer(r'<h2[^>]*class="[^"]*cat-title[^"]*"[^>]*>(.*?)</h2>', html_text, flags=re.I | re.S):
+    text = re.sub(r'<[^>]+>', '', html.unescape(cat_match.group(1)))
+    category = re.sub(r'\s+', ' ', text).strip()
+    cat_positions.append((cat_match.start(), category))
 
-for match in pattern.finditer(html_text):
-    if match.group("cat") is not None:
-        text = re.sub(r'<[^>]+>', '', html.unescape(match.group("cat")))
-        current_category = re.sub(r'\s+', ' ', text).strip()
+for tile_match in re.finditer(r'<div\b[^>]*class="[^"]*(?:portal-tile|space-tile)[^"]*"[^>]*>', html_text, flags=re.I):
+    tile_start = tile_match.start()
+    current_category = ""
+    for cat_start, category in reversed(cat_positions):
+        if cat_start < tile_start:
+            current_category = category
+            break
+
+    block_start = tile_match.end()
+    depth = 1
+    i = block_start
+    block_end = None
+    while i < len(html_text):
+        div_open = html_text.find('<div', i)
+        div_close = html_text.find('</div>', i)
+        if div_open == -1 and div_close == -1:
+            break
+        if div_close == -1 or (div_open != -1 and div_open < div_close):
+            depth += 1
+            i = div_open + 4
+        else:
+            depth -= 1
+            i = div_close + 6
+            if depth == 0:
+                block_end = div_close + 6
+                break
+    if block_end is None:
+        block = html_text[tile_match.start():]
+    else:
+        block = html_text[tile_match.start():block_end]
+
+    link_match = re.search(r'<a[^>]*href=("|\')(.*?)\1', block, flags=re.I)
+    if not link_match:
         continue
 
-    url = match.group("url").strip()
-    content = match.group("content")
-    title_match = re.search(r'<p[^>]*>(.*?)</p>', content, flags=re.I | re.S)
+    url = link_match.group(2).strip()
+    if not url:
+        continue
+
+    content_match = re.search(r'<div[^>]*class="[^"]*(?:portal-tile-content|space-tile-content)[^"]*"[^>]*>(.*?)</div>', block, flags=re.I | re.S)
+    if not content_match:
+        continue
+
+    title_match = re.search(r'<p[^>]*>(.*?)</p>', content_match.group(1), flags=re.I | re.S)
     if not title_match:
         continue
 
@@ -367,28 +413,70 @@ for item in "${FILTERED_TILES[@]}"; do
                     idx=$((i + j))
                     if (( idx > ${#QUEUE[@]} )); then break; fi
                     
-                    current_url="${QUEUE[$idx]}"
+                    original_url="${QUEUE[$idx]}"
+                    current_url="$original_url"
                     html_path="${temp_dir}/dom_d${depth}_${idx}.html"
+                    resolved_url_file="${temp_dir}/resolved_${idx}.txt"
+                    rm -f "$resolved_url_file"
                     
                     if [[ "$ENGINE" == "curl" ]]; then
                         echo -e "         ${GRAY}-> [cURL] Fetching: $current_url${RESET}"
                         (
-                            http_code=$(curl -s -L -A "$USER_AGENT" -w "%{http_code}" -o "$html_path" "$current_url")
-                            if [[ "$http_code" -ge 400 ]] || [[ "$http_code" == "000" ]]; then
-                                echo -e "         ${DARK_RED}-> [SKIP] HTTP $http_code (Dead Link): $current_url${RESET}"
-                                rm -f "$html_path"
-                            else
-                                echo -e "         ${YELLOW}-> [cURL] Success: $current_url${RESET}"
+                            success=false
+                            candidate_urls=("$original_url")
+                            if [[ "$lang" != "en" ]]; then
+                                fallback_url=$(echo "$original_url" | sed -E "s|/latest/[^/]+/|/latest/en/|")
+                                if [[ "$fallback_url" != "$original_url" ]]; then
+                                    candidate_urls+=("$fallback_url")
+                                fi
                             fi
+
+                            for candidate_url in "${candidate_urls[@]}"; do
+                                for attempt in 1 2 3; do
+                                    http_code=$(curl -s -L -A "$USER_AGENT" -w "%{http_code}" -o "$html_path" "$candidate_url")
+                                    if [[ "$http_code" -ge 400 ]] || [[ "$http_code" == "000" ]] || is_error_page "$html_path"; then
+                                        rm -f "$html_path"
+                                        if (( attempt < 3 )); then
+                                            echo -e "         ${YELLOW}-> [RETRY $attempt/3] HTTP $http_code on: $candidate_url${RESET}"
+                                            continue
+                                        fi
+                                        echo -e "         ${DARK_RED}-> [SKIP] HTTP $http_code (Dead Link): $candidate_url${RESET}"
+                                    else
+                                        echo -e "         ${YELLOW}-> [cURL] Success: $candidate_url${RESET}"
+                                        success=true
+                                        printf '%s\n' "$candidate_url" > "$resolved_url_file"
+                                        break
+                                    fi
+                                done
+                                if [[ "$success" == true ]]; then
+                                    break
+                                fi
+                            done
                         ) &
                     else
                         echo -e "         ${GRAY}-> [CHROME] Rendering DOM: $current_url${RESET}"
                         (
-                            "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --dump-dom --virtual-time-budget=5000 "$current_url" > "$html_path" 2>/dev/null
-                            if [[ ! -s "$html_path" ]]; then
+                            success=false
+                            candidate_urls=("$original_url")
+                            if [[ "$lang" != "en" ]]; then
+                                fallback_url=$(echo "$original_url" | sed -E "s|/latest/[^/]+/|/latest/en/|")
+                                if [[ "$fallback_url" != "$original_url" ]]; then
+                                    candidate_urls+=("$fallback_url")
+                                fi
+                            fi
+
+                            for candidate_url in "${candidate_urls[@]}"; do
+                                "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --dump-dom --user-agent="$USER_AGENT" --virtual-time-budget=10000 "$candidate_url" > "$html_path" 2>/dev/null
+                                if [[ -s "$html_path" ]] && ! is_error_page "$html_path"; then
+                                    echo -e "         ${YELLOW}-> [CHROME] Success: $candidate_url${RESET}"
+                                    printf '%s\n' "$candidate_url" > "$resolved_url_file"
+                                    success=true
+                                    break
+                                fi
                                 rm -f "$html_path"
-                            else
-                                echo -e "         ${YELLOW}-> [CHROME] Success: $current_url${RESET}"
+                            done
+                            if [[ "$success" != true ]]; then
+                                rm -f "$resolved_url_file"
                             fi
                         ) &
                     fi
@@ -397,11 +485,20 @@ for item in "${FILTERED_TILES[@]}"; do
             done
             
             for (( i=1; i<=${#QUEUE[@]}; i++ )); do
-                current_url="${QUEUE[$i]}"
+                original_url="${QUEUE[$i]}"
+                current_url="$original_url"
                 html_path="${temp_dir}/dom_d${depth}_${i}.html"
+                resolved_url_file="${temp_dir}/resolved_${i}.txt"
+                
+                if [[ -f "$resolved_url_file" ]]; then
+                    current_url=$(cat "$resolved_url_file")
+                    if (( depth == 0 )) && (( i == 1 )); then
+                        MASTER_URL_LIST[1]="$current_url"
+                    fi
+                fi
                 
                 if [[ ! -f "$html_path" ]]; then
-                    FAILED_URLS[$current_url]=1
+                    FAILED_URLS[$original_url]=1
                     continue
                 fi
                 
