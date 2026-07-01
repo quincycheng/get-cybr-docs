@@ -188,6 +188,13 @@ resolve_url() {
     
     link="${link%%#*}"
     link="${link%%\?*}"
+
+    # Ignore non-web schemes and placeholder anchors.
+    case "$link" in
+        ""|"#"|mailto:*|javascript:*|data:*|tel:*|about:*)
+            return 1
+            ;;
+    esac
     
     if [[ "$link" == http* ]]; then
         full_url="$link"
@@ -297,6 +304,18 @@ PY
 )
 
 IFS=$oldIFS
+
+# Deduplicate tiles while preserving the original order.
+typeset -A SEEN_TILES
+UNIQUE_TILE_DATA=()
+for item in "${TILE_DATA[@]}"; do
+    if [[ -z "${SEEN_TILES[$item]}" ]]; then
+        SEEN_TILES[$item]=1
+        UNIQUE_TILE_DATA+=("$item")
+    fi
+done
+TILE_DATA=("${UNIQUE_TILE_DATA[@]}")
+
 stop_spinner
 
 # ==========================================
@@ -435,6 +454,16 @@ for item in "${FILTERED_TILES[@]}"; do
                                 for attempt in 1 2 3; do
                                     http_code=$(curl -s -L -A "$USER_AGENT" -w "%{http_code}" -o "$html_path" "$candidate_url")
                                     if [[ "$http_code" -ge 400 ]] || [[ "$http_code" == "000" ]] || is_error_page "$html_path"; then
+                                        # Some docs endpoints block curl (403) but are still renderable by Chrome.
+                                        if [[ "$http_code" == "403" ]] || [[ "$http_code" == "302" ]] || [[ "$http_code" == "301" ]]; then
+                                            "$CHROME_PATH" --headless=new --disable-gpu --disable-dev-shm-usage --no-sandbox --dump-dom --user-agent="$USER_AGENT" --virtual-time-budget=10000 "$candidate_url" > "$html_path" 2>/dev/null
+                                            if [[ -s "$html_path" ]] && ! is_error_page "$html_path"; then
+                                                echo -e "         ${YELLOW}-> [CHROME-FALLBACK] Success: $candidate_url${RESET}"
+                                                success=true
+                                                printf '%s\n' "$candidate_url" > "$resolved_url_file"
+                                                break
+                                            fi
+                                        fi
                                         rm -f "$html_path"
                                         if (( attempt < 3 )); then
                                             echo -e "         ${YELLOW}-> [RETRY $attempt/3] HTTP $http_code on: $candidate_url${RESET}"
@@ -507,10 +536,10 @@ for item in "${FILTERED_TILES[@]}"; do
                     
                     for sub in "${sub_links[@]}"; do
                         case "$sub" in
-                            *.css|*.js|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico|*.woff|*.woff2|*.ttf|*\[%*) continue ;;
+                            *.css|*.js|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico|*.woff|*.woff2|*.ttf|*\[%*|mailto:*|javascript:*|data:*|tel:*|about:*|*/notice.htm|notice.htm) continue ;;
                         esac
                         
-                        full_sub=$(resolve_url "$current_url" "$sub")
+                        full_sub=$(resolve_url "$current_url" "$sub") || continue
                         
                         setopt nocasematch
                         if [[ "$full_sub" == "${product_base}"*"/latest/${lang}/"* ]]; then
